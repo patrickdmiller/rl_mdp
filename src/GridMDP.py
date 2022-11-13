@@ -107,10 +107,6 @@ class GridMDP:
     
     action = self.Policy[p]
     return action
-    if as_p:
-      return action
-    else:
-      return self.grid.to_s(action)
   
   def empty_states(self, val=None):
     ret = {}
