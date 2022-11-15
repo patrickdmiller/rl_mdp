@@ -25,6 +25,16 @@ class Directions:
     self.probs['s'] = s
     self.probs['b'] = b
   
+  #returns neighbor and direction
+  def get_valid_neighbors_and_directions(self, p):
+    neighbors = []
+    for d in range(len(self)):
+      neighbor = self.get_coordinate_from_direction(p, d)
+      if self.grid.is_valid(neighbor):
+        neighbors.append((neighbor, d))
+    return neighbors
+
+  
   #return coordinates and probabilities that we would try and go to
   def get_target_coordinate_and_prob_from_direction(self, p, direction):
     ret = []
@@ -66,21 +76,53 @@ class PolicyIterationStrategy(PolicyStrategy):
     self.policy = policy
     self.dirs = dirs
     self.gamma = gamma
-  def evaluate(self):
+    self.history = []
+    self.utilities = self.grid.empty_states(0)
+  def evaluate(self, in_place=True):
     #iterate over each 
-    utilities = self.grid.empty_states(0)
+    utilities_temp = self.grid.empty_states(0)
+    
+    for i in range(20):
+      delta = 0
+      for r in range(self.grid.h):
+        for c in range(self.grid.w):
+          u = self.grid.get_reward((r,c))
+          debug_s = f'v{self.grid.to_s((r,c))} = {u}'
+          if not self.grid.is_terminal((r,c)) and self.grid.is_valid((r,c)):
+            results = self.dirs.get_resulting_coordinate_and_prob_from_direction(p=(r,c), direction=self.policy[(r,c)])
+            for p, prob in results:
+              debug_s+=f'+({self.gamma} * {prob} * {self.utilities[p]})'
+              u += (self.gamma * prob * self.utilities[p])
+          else:
+              u += (self.gamma * self.utilities[(r,c)])
+          delta += abs(self.utilities[(r,c)] - u)
+          if in_place: 
+            self.utilities[(r,c)] = u
+          else:
+            utilities_temp[(r,c)] = u
+          debug_s+=f' = {u}'
+          # print(debug_s)
+      if not in_place:
+        self.utilities = utilities_temp
+        
+      self.history.append(delta)
+      print(self.policy)
+  def improve(self):
+    did_change = False
     for r in range(self.grid.h):
       for c in range(self.grid.w):
-        u = self.grid.get_reward((r,c))
-        # print(u)
-        if not self.grid.is_terminal((r,c)) and self.grid.is_valid((r,c)):
-          print("not terminal: ", (r,c))
-          results = self.dirs.get_resulting_coordinate_and_prob_from_direction(p=(r,c), direction=self.policy[(r,c)])
-          for p, prob in results:
-            u += (self.gamma * prob * utilities[p])
-        utilities[(r,c)] = u
-    print(utilities)
-    
+        best_direction = -1
+        best_utility = -float('inf')
+        for p, direction in self.dirs.get_valid_neighbors_and_directions(p=(r,c)):
+          if self.utilities[p] > best_utility:
+            best_direction = direction
+            best_utility = self.utilities[p]
+        if best_direction > -1:
+          if self.policy[(r,c)] != best_direction:
+            print("changing", (r,c), self.grid.to_s((r,c)), " from ", self.policy[(r,c)], "to", best_direction)
+            self.policy[(r,c)] = best_direction
+            did_change = True
+    return did_change
   def generate(self):
     for r in range(self.grid.h):
       for c in range(self.grid.w):
@@ -188,8 +230,11 @@ class GridMDP:
       self.strategy = strategy(grid = self.grid, policy = self.policy, dirs = self.dirs)
       if starting_policy is None:
         self.strategy.generate()
-    
+    while True:
       self.strategy.evaluate()
+      if not self.strategy.improve():
+        break
+      
 
   def get_action(self, p = None, s = None):
     as_p = True
@@ -266,7 +311,10 @@ class TestDirections(unittest.TestCase):
     self.assertEqual(sorted(results), sorted([((-1, 0), 0.8), ((0, -1), 0.1), ((0, 1), 0.1)]))
     results = self.d.get_resulting_coordinate_and_prob_from_direction((0,0), 0)
     self.assertEqual(sorted(results), sorted([((0, 0), 0.8), ((0, 0), 0.1), ((0, 1), 0.1)]))
-     
+    
+    self.assertEqual(self.d.get_coordinate_from_direction((1,2), 1), (1,3))
+    
+    self.assertEqual(sorted(self.d.get_valid_neighbors_and_directions((1,2))), sorted([((0,2), 0), ((2,2), 2), ((1,3), 1)])) #(1,1) is invalid
 
   def test_grid_label(self):
     self.assertEqual(self.grid.to_p(10), (2,2))
@@ -295,6 +343,7 @@ class TestDirections(unittest.TestCase):
       (2,3):0
     }
     self.mdp.build_policy(strategy = PolicyIterationStrategy, starting_policy=policy)
+    
     
 if __name__ == '__main__':
 
