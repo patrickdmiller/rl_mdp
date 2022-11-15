@@ -28,14 +28,17 @@ class FrozenLake:
     self.set_active_map(list(self.maps.keys())[0], 0)
     
     self.action_convert = {0:3, 1:2, 2:1, 3:0} #frozen lake 0 is left, and gridmdp 3 is left
-  def init_mdp(self):
-    self.mdp = GridMDP(w = self.map_size, h=self.map_size, motion_forward_prob=1/3, motion_side_prob=1/3, motion_back_prob=0)
+  def init_mdp(self, default_reward = 0):
+    self.mdp = GridMDP(w = self.map_size, h=self.map_size, motion_forward_prob=1/3, motion_side_prob=1/3, motion_back_prob=0, default_reward=default_reward)
     for r in range(self.map_size):
       for c in range(self.map_size):
         if self.map[r][c] == 'G':
           self.mdp.grid.add_reward(p=(r,c), amt=1)
         elif self.map[r][c] == 'H':
-          self.mdp.grid.add_invalid(p=(r,c))
+          #is a hole invalid or negative reward? You don't bounce off. you actually end the game so i am going with negative reward here. 
+          # self.mdp.grid.add_invalid(p=(r,c))
+          self.mdp.grid.add_reward(p=(r,c), amt=-999)
+          
     self.mdp.compute_state_transition_matrix()
     
   def generate_and_save_maps(self, num_per_size=2, sizes=[4,20]):
