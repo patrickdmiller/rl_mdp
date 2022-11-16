@@ -32,6 +32,31 @@ class PolicyStrategy:
       for c in range(self.grid.w):
         print(which[(r,c)], sep=" | ", end="\t|")
     print("\n----------")
+    
+  def build_policy(self):
+    did_change = False
+      #iterate over each and pick the best direction
+    for r in range(self.grid.h):
+      for c in range(self.grid.w):
+        if self.grid.is_valid((r,c)) and not self.grid.is_terminal((r,c)):
+          best_direction = -1
+          best_utility = -float('inf')
+          
+          for direction in range(len(self.dirs)):
+
+          #which direction has the highest utility?
+            next_positions = self.dirs.get_resulting_coordinate_and_prob_from_direction((r,c), direction)
+            u = 0
+            for np, prob in next_positions:
+              u += (self.utilities.get(np) * prob)
+            if u > best_utility:
+              best_utility = u
+              best_direction = direction
+          if best_direction > -1:
+            if self.policy[(r,c)] != best_direction:
+              self.policy[(r,c)] = best_direction
+              did_change = True
+    return did_change
 
 class ValueIterationStrategy(PolicyStrategy):
   def __init__(self, grid, dirs, gamma=0.5): #inject grid and policy
@@ -50,12 +75,13 @@ class ValueIterationStrategy(PolicyStrategy):
       #random
       self.policy = self.grid.empty_states(0)
         #generate a random policy
-      for r in range(self.grid.h):
-        for c in range(self.grid.w):
-          if self.grid.is_valid((r,c)) and not self.grid.is_bad((r,c)):
-            self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
+      # for r in range(self.grid.h):
+      #   for c in range(self.grid.w):
+      #     if self.grid.is_valid((r,c)) and not self.grid.is_bad((r,c)):
+      #       self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
     self.pp(which=self.utilities)
-    self.iterate()
+    for i in range(100):
+      self.iterate()
     # max_iterations = 500
     # loops = 0
     # while True and loops < max_iterations:
@@ -63,16 +89,19 @@ class ValueIterationStrategy(PolicyStrategy):
     #   self.evaluate()
     #   if not self.improve():
     #     break
+    self.build_policy()
     self.pp(which=self.utilities)
+    self.pp()
   
   def iterate(self):
     #iterate over each space
+    delta = 0
     for r in range(self.grid.h):
       for c in range(self.grid.w):
         #get the best utility from moving in all directions
         if self.grid.is_valid((r,c)):
           new_u = self.grid.get_reward((r,c))
-          print(new_u)
+          # print(new_u)
           if not self.grid.is_terminal((r,c)):
             #try in each direction to find the max utility FROM this spot, then add the default
             
@@ -92,9 +121,10 @@ class ValueIterationStrategy(PolicyStrategy):
           else:
           #if it's termina. itself. 
             new_u += (self.gamma * self.utilities.get((r,c)))
-
+          delta += abs(self.utilities[(r,c)] - new_u)
           self.utilities.set((r,c), new_u)
-      
+    return delta
+
   def get_policy_for_state(self, p):
     return self.policy[p]
 
@@ -127,7 +157,7 @@ class PolicyIterationStrategy(PolicyStrategy):
     while True and loops < max_iterations:
       loops+=1
       self.evaluate()
-      if not self.improve():
+      if not self.build_policy():
         break
     self.pp()
   
@@ -161,38 +191,7 @@ class PolicyIterationStrategy(PolicyStrategy):
 
         
       self.history.append(delta)
-      # print(self.utilities)
-      # print(self.policy)
-  def improve(self):
-    did_change = False
-    for r in range(self.grid.h):
-      for c in range(self.grid.w):
-        if self.grid.is_valid((r,c)) and not self.grid.is_terminal((r,c)):
-          best_direction = -1
-          best_utility = -float('inf')
-          # for p, direction in self.dirs.get_valid_neighbors_and_directions(p=(r,c)):
-          
-          for direction in range(len(self.dirs)):
-          #which direction has the highest utility?
-            next_positions = self.dirs.get_resulting_coordinate_and_prob_from_direction((r,c), direction)
-            u = 0
-            for np, prob in next_positions:
-              u += (self.utilities.get(np) * prob)
-            # if r == 7 and c == 6:
-            #   print(direction, u)
-            if u > best_utility:
-              best_utility = u
-              best_direction = direction
-          # if r == 7 and c == 6:
-          #   print("best = ", best_direction)
-          if best_direction > -1:
-            if self.policy[(r,c)] != best_direction:
-              self.policy[(r,c)] = best_direction
-              did_change = True
-
-          
-    return did_change
-
+    
 class Grid:
   def __init__(self,w,h, default_reward=0, default_bad_reward=-1):
     self.w = w
@@ -389,10 +388,17 @@ class TestDirections(unittest.TestCase):
       (2,2):1,
       (2,3):0
     }
+    correct_policy = {(0, 0): 1, (0, 1): 1, (0, 2): 1, (0, 3): 1, (1, 0): 0, (1, 1): 0, (1, 2): 0, (1, 3): 3, (2, 0): 0, (2, 1): 1, (2, 2): 0, (2, 3): 2}
     self.mdp.build_policy(strategy = PolicyIterationStrategy, starting_policy=policy)
-    
+    self.assertEqual(self.mdp.strategy.policy[(0,0)], correct_policy[(0,0)])
+    self.assertEqual(self.mdp.strategy.policy[(0,1)], correct_policy[(0,1)])
+    self.assertEqual(self.mdp.strategy.policy[(1,0)], correct_policy[(1,0)])
+    self.assertEqual(self.mdp.strategy.policy[(2,3)], correct_policy[(2,3)])
     self.mdp.build_policy(strategy=ValueIterationStrategy, starting_policy = policy)
-    
+    self.assertEqual(self.mdp.strategy.policy[(0,0)], correct_policy[(0,0)])
+    self.assertEqual(self.mdp.strategy.policy[(0,1)], correct_policy[(0,1)])
+    self.assertEqual(self.mdp.strategy.policy[(1,0)], correct_policy[(1,0)])
+    self.assertEqual(self.mdp.strategy.policy[(2,3)], correct_policy[(2,3)])
 if __name__ == '__main__':
 
   unittest.main()

@@ -49,11 +49,11 @@ class FrozenLake:
           
     self.mdp.compute_state_transition_matrix()
     
-  def generate_and_save_maps(self, num_per_size=10, sizes=[4,8,20]):
+  def generate_and_save_maps(self, num_per_size=10, sizes=[4,8,20], **kwargs):
     for s in sizes:
       self.maps[s] = []
       for n in range(num_per_size):
-        self.maps[s].append(generate_random_map(size=s))
+        self.maps[s].append(generate_random_map(size=s, **kwargs))
     with  open(os.path.join(self.map_pickle_dir, 'maps_pickle.p'), 'wb') as pickle_file:
       pk.dump(self.maps,pickle_file)
   
@@ -72,18 +72,19 @@ class FrozenLake:
     return self.action_convert[action]
 if __name__ == '__main__':
   fl = FrozenLake()
-  fl.set_active_map(key=8, index=1)
+  fl.generate_and_save_maps(sizes=[20], p=0.9)
+  fl.set_active_map(key=20, index=0)
   fl.mdp.build_policy(strategy=PolicyIterationStrategy)
   print("UTILITY: ", fl.mdp.strategy.utilities.values)
-  env = gymmake("FrozenLake-v1", desc=fl.map, is_slippery=True, max_episode_steps=1250)#, render_mode="human")
+  env = gymmake("FrozenLake-v1", desc=fl.map, is_slippery=True, max_episode_steps=1250, render_mode="")
   observation, info = env.reset(seed=42)
   action = fl.add_observation(observation, info)
   print("first action", action)
   i=0
   
-  history = np.array([])
+  history = []
   runs = 0
-  while runs < 50:
+  while runs < 150:
     
     observation, reward, terminated, truncated, info = env.step(action)
     action = fl.add_observation(observation, info)
@@ -93,13 +94,16 @@ if __name__ == '__main__':
         observation, info = env.reset()
         action = fl.add_observation(observation, info)
         print("reset and at", observation, i)
-        history = np.append([reward, i], axis=0)
+        history.append([reward, i])
         runs+=1
         i=0
     else:
       i+=1   
          
   print("done")
+  
   #win/loss
-  print()
+  history = np.array(history)
+  print("win", np.sum(history[:, 0]), "of ", len(history))
+  print("avg moves", np.average(history[:,1]))
   env.close()
