@@ -6,103 +6,137 @@ gatech: pmiller75
 
 import unittest
 import numpy as np
-
-class Utility:
-  def __init__(self, w, h):
-    self.values = {}
-    self.h, self.w = h,w
-    for r in range(self.h):
-      for c in range(self.w):
-        self.values[(r, c)] = 0
-
-  def get(self, p):
-    if p in self.values:
-      return self.values[p]
-    return 0
-  
-  def set(self, p, value):
-    if p not in self.values:
-      raise Exception("invalid point in utility", p)
-    self.values[p] = value
-  
-#0 is up, 1 is right
-class Directions:
-  def __init__(self, grid):
-    self.dir_transitions = [[-1, 0], [0, 1], [1, 0], [0, -1]]
-    self.probs = {}
-    self.length = 4
-    self.grid = grid
-
-  def get_coordinate_from_direction(self, p, direction):
-    assert direction < len(self.dir_transitions) and direction >= 0
-    return (p[0] + self.dir_transitions[direction][0],
-                 p[1] + self.dir_transitions[direction][1])
-
-  def set_probabilities(self, f=1, s=0, b=0):
-    self.probs['f'] = f
-    self.probs['s'] = s
-    self.probs['b'] = b
-  
-  #returns neighbor and direction
-  def get_all_neighbors_and_directions(self, p):
-    neighbors = []
-    for d in range(len(self)):
-      neighbor = self.get_coordinate_from_direction(p, d)
-      neighbors.append((neighbor, d))
-    return neighbors
-  
-  def get_valid_neighbors_and_directions(self, p):
-    neighbors = []
-    for d in range(len(self)):
-      neighbor = self.get_coordinate_from_direction(p, d)
-      if self.grid.is_valid(neighbor):
-        neighbors.append((neighbor, d))
-    return neighbors
-  
-  #return coordinates and probabilities that we would try and go to
-  def get_target_coordinate_and_prob_from_direction(self, p, direction):
-    ret = []
-    if self.probs['f'] > 0:
-      ret.append((self.get_coordinate_from_direction(p, direction), self.probs['f']))
-    if self.probs['s'] > 0:
-      #ccw
-      ccw_direction = (direction - 1) % len(self)
-      ret.append((self.get_coordinate_from_direction(p, ccw_direction), self.probs['s']))
-      #cw
-      cw_direction = (direction + 1) % len(self)
-      ret.append((self.get_coordinate_from_direction(p, cw_direction), self.probs['s']))
-    if self.probs['b'] > 0:
-      ret.append((self.get_coordinate_from_direction(p, (direction + 2) % len(self)), self.probs['b']))
-    return ret
-  
-  #return actual coordinates and probabilities that we would go to
-  def get_resulting_coordinate_and_prob_from_direction(self, p, direction):
-    results = []
-    targets = self.get_target_coordinate_and_prob_from_direction( p, direction)
-    
-    # [((2, 4), 0.8), ((1, 3), 0.1), ((3, 3), 0.1)]
-    for coord, prob in targets:
-      if not self.grid.is_valid(coord):
-        results.append((p, prob))
-      else:
-        results.append((coord, prob))
-    return results
-  def __len__(self):
-    return self.length
+from abc import ABC, abstractmethod
+from utilities import Utility, Directions
 
 class PolicyStrategy:
   def __init__(self):
     pass
+  
+  @abstractmethod
+  def build(self):
+    pass
 
-class PolicyIterationStrategy(PolicyStrategy):
-  def __init__(self, grid, policy, dirs, gamma=0.5): #inject grid and policy
+  @abstractmethod
+  def get_policy_for_state(self, p):
+    pass
+  
+  def pp(self, which=None):
+    if not which:
+      which = self.policy
+    if not self.grid or not self.policy:
+      return
+    print("size: ", self.grid.w, 'x', self.grid.h)
+    for r in range(self.grid.h):
+      print("")
+      for c in range(self.grid.w):
+        print(which[(r,c)], sep=" | ", end="\t|")
+    print("\n----------")
+
+class ValueIterationStrategy(PolicyStrategy):
+  def __init__(self, grid, dirs, gamma=0.5): #inject grid and policy
     self.grid = grid
-    self.policy = policy
+    self.policy = None
     self.dirs = dirs
     self.gamma = gamma
     self.history = []
     self.utilities = Utility(w = self.grid.w, h=self.grid.h)
+    
+  def build(self, starting_policy = None):
+    #if a starting policy , use it
+    if starting_policy:
+      self.policy = starting_policy
+    else:
+      #random
+      self.policy = self.grid.empty_states(0)
+        #generate a random policy
+      for r in range(self.grid.h):
+        for c in range(self.grid.w):
+          if self.grid.is_valid((r,c)) and not self.grid.is_bad((r,c)):
+            self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
+    self.pp(which=self.utilities)
+    self.iterate()
+    # max_iterations = 500
+    # loops = 0
+    # while True and loops < max_iterations:
+    #   loops+=1
+    #   self.evaluate()
+    #   if not self.improve():
+    #     break
+    self.pp(which=self.utilities)
   
+  def iterate(self):
+    #iterate over each space
+    for r in range(self.grid.h):
+      for c in range(self.grid.w):
+        #get the best utility from moving in all directions
+        if self.grid.is_valid((r,c)):
+          new_u = self.grid.get_reward((r,c))
+          print(new_u)
+          if not self.grid.is_terminal((r,c)):
+            #try in each direction to find the max utility FROM this spot, then add the default
+            
+            best_utility = -float('inf')
+            best_direction = -1
+                    
+            for direction in range(len(self.dirs)):
+              next_positions = self.dirs.get_resulting_coordinate_and_prob_from_direction(p=(r,c), direction=direction)
+              u = 0
+              for np, prob in next_positions:
+                u += (self.gamma * self.utilities[(np)] * prob)
+              if u > best_utility:
+                best_utility = u
+                best_direction = direction
+            new_u += best_utility
+            
+          else:
+          #if it's termina. itself. 
+            new_u += (self.gamma * self.utilities.get((r,c)))
+
+          self.utilities.set((r,c), new_u)
+      
+  def get_policy_for_state(self, p):
+    return self.policy[p]
+
+  def get_utility_for_state(self, p):
+    return self.utilities.get(p)
+class PolicyIterationStrategy(PolicyStrategy):
+  def __init__(self, grid, dirs, gamma=0.5): #inject grid and policy
+    self.grid = grid
+    self.policy = None
+    self.dirs = dirs
+    self.gamma = gamma
+    self.history = []
+    self.utilities = Utility(w = self.grid.w, h=self.grid.h)
+    
+  def build(self, starting_policy = None):
+    #if a starting policy , use it
+    if starting_policy:
+      self.policy = starting_policy
+    else:
+      #random
+      self.policy = self.grid.empty_states(0)
+        #generate a random policy
+      for r in range(self.grid.h):
+        for c in range(self.grid.w):
+          if self.grid.is_valid((r,c)) and not self.grid.is_bad((r,c)):
+            self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
+    
+    max_iterations = 500
+    loops = 0
+    while True and loops < max_iterations:
+      loops+=1
+      self.evaluate()
+      if not self.improve():
+        break
+    self.pp()
+  
+  def get_policy_for_state(self, p):
+    return self.policy[p]
+
+  def get_utility_for_state(self, p):
+    return self.utilities.get(p)
+ 
   def evaluate(self):
     #iterate over each 
     for i in range(50):
@@ -144,13 +178,13 @@ class PolicyIterationStrategy(PolicyStrategy):
             u = 0
             for np, prob in next_positions:
               u += (self.utilities.get(np) * prob)
-            if r == 7 and c == 6:
-              print(direction, u)
+            # if r == 7 and c == 6:
+            #   print(direction, u)
             if u > best_utility:
               best_utility = u
               best_direction = direction
-          if r == 7 and c == 6:
-            print("best = ", best_direction)
+          # if r == 7 and c == 6:
+          #   print("best = ", best_direction)
           if best_direction > -1:
             if self.policy[(r,c)] != best_direction:
               self.policy[(r,c)] = best_direction
@@ -158,14 +192,7 @@ class PolicyIterationStrategy(PolicyStrategy):
 
           
     return did_change
-  def generate(self):
-    for r in range(self.grid.h):
-      for c in range(self.grid.w):
-        if self.grid.is_valid((r,c)) and not self.grid.is_bad((r,c)):
-          self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
 
-
-  
 class Grid:
   def __init__(self,w,h, default_reward=0, default_bad_reward=-1):
     self.w = w
@@ -255,45 +282,15 @@ class GridMDP:
   def build_policy(self, strategy=None, starting_policy=None):
     if not strategy:
       raise Exception("No strategy defined")
-      #random
-      for r in range(self.grid.h):
-        for c in range(self.grid.w):
-          self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
     else:
       self.policy = starting_policy
-      if self.policy == None:
-        self.policy = self.grid.empty_states(0)
-        #generate a random policy
-        for r in range(self.grid.h):
-          for c in range(self.grid.w):
-            self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
-      self.strategy = strategy(grid = self.grid, policy = self.policy, dirs = self.dirs)
-      if starting_policy is None:
-        self.strategy.generate()
-      cc= 0 
-      while True and cc < 500:
-        cc+=1
-        print("loop")
-        self.strategy.evaluate()
-        # print(self.strategy.history)
-        if not self.strategy.improve():
-          break
-      self.pp()
-  def pp(self):
-    print("size: ", self.grid.w, 'x', self.grid.h)
-    for r in range(self.grid.h):
-      print("")
-      for c in range(self.grid.w):
-        print(self.policy[(r,c)], sep=" | ", end=" | ")
-    print("\n----------")
+      self.strategy = strategy(grid = self.grid, dirs = self.dirs)
+      self.strategy.build()
+
   def get_action(self, p = None, s = None):
-    as_p = True
     if p is None:
-      as_p = False
       p = self.grid.to_p(s)
-    
-    action = self.policy[p]
-    return action
+    return self.strategy.get_policy_for_state(p)
 
 
   def compute_state_transition_matrix(self, full=False):
@@ -394,6 +391,7 @@ class TestDirections(unittest.TestCase):
     }
     self.mdp.build_policy(strategy = PolicyIterationStrategy, starting_policy=policy)
     
+    self.mdp.build_policy(strategy=ValueIterationStrategy, starting_policy = policy)
     
 if __name__ == '__main__':
 
