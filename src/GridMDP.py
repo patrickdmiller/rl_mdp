@@ -38,7 +38,7 @@ class PolicyStrategy(ABC):
     for r in range(self.grid.h):
       print("")
       for c in range(self.grid.w):
-        print(which[(r,c)], sep=" | ", end="\t|")
+        print(np.round(which[(r,c)],3), sep=" | ", end="\t\t|")
     print("\n----------")
     
   def build_policy(self):
@@ -67,12 +67,12 @@ class PolicyStrategy(ABC):
     return did_change
   
 class QLearnerStrategy(PolicyStrategy):
-  def __init__(self, grid, dirs, gamma = 0.5, epsilon= 0.5):
+  def __init__(self, grid, dirs, gamma = 0.5, epsilon= 0.1):
     self.grid = grid
     self.dirs = dirs
     self.memory = None
     self.Q = {}
-    self.gamma = gamma
+    self.gamma = .9
     self.epsilon = epsilon
     self.alpha = 0.5
   def build(self, **kwargs):
@@ -89,10 +89,13 @@ class QLearnerStrategy(PolicyStrategy):
     
     # if reward is not None and reward > 0 and self.memory != None:
       # print("we got a reward of",reward, "at point",  p)
-    if reward != None and self.memory != None and learning:
+    if self.memory != None and learning:
       #we received a reward for the thing we did in memory, add the reward
-      self.Q[self.memory[0]][self.memory[1]] = self.Q[self.memory[0]][self.memory[1]] + (self.alpha * (reward + (self.gamma * max(self.Q[p])))) - self.Q[self.memory[0]][self.memory[1]]
-    
+      # self.Q[self.memory[0]][self.memory[1]] = self.Q[self.memory[0]][self.memory[1]] + (self.alpha * (reward + (self.gamma * max(self.Q[p])))) - self.Q[self.memory[0]][self.memory[1]]
+      # if (reward + (self.gamma * max(self.Q[p]))) > 0:
+      
+      # self.Q[self.memory[0]][self.memory[1]] = ( reward + (self.gamma * max(self.Q[p])))  
+      self.Q[self.memory[0]][self.memory[1]] = ((1-self.alpha) * self.Q[self.memory[0]][self.memory[1]] ) + self.alpha * ( reward + (self.gamma * max(self.Q[p])))  
     #find the best Q
     best_directions = []
     best_value = -float('inf')
@@ -186,7 +189,7 @@ class ValueIterationStrategy(PolicyStrategy):
           self.utilities.set((r,c), new_u)
     return delta
 
-  def process_state(self, p, reward=None):
+  def process_state(self, p, reward=None, **kwargs):
     return self.policy[p]
 
   def get_utility_for_state(self, p):
@@ -222,7 +225,7 @@ class PolicyIterationStrategy(PolicyStrategy):
         break
     self.pp()
   
-  def process_state(self, p, reward=None):
+  def process_state(self, p, reward=None, **kwargs):
     return self.policy[p]
 
   def get_utility_for_state(self, p):
@@ -338,7 +341,7 @@ class GridMDP:
     # self.S = self.build_statemap()
     # self.compute_state_transition_matrix()
   
-  def build_policy(self, strategy=None, starting_policy=None, environment = None):
+  def build_policy(self, strategy=None, starting_policy=None, environment = None, punish=False):
     if not strategy:
       raise Exception("No strategy defined")
     else:
@@ -350,7 +353,7 @@ class GridMDP:
       if not environment:
         raise Exception("Q Learning requires an environment parameter to learn in")
     
-      max_learning_epochs = 10000
+      max_learning_epochs = 100000
       for i in range(max_learning_epochs):
         observation, info = environment.env.reset()
         action = environment.action_convert[self.process_state(s=observation, learning=True)]
@@ -362,16 +365,17 @@ class GridMDP:
           if terminated or truncated:
             #if we're in a terminal state AND we got no reward, we fell in the water.
             if reward < 1 and self.grid.is_terminal(self.grid.to_p(observation)):
-              pass
-              environment.action_convert[self.process_state(s = observation, reward= -100, learning=True)]
+              if punish:
+                environment.action_convert[self.process_state(s = observation, reward= -10, learning=True)]
+              else:
+                pass
             else:
-              print("we got there!")
-              environment.action_convert[self.process_state(s = observation, reward= 100, learning=True)]
+              environment.action_convert[self.process_state(s = observation, reward= 10, learning=True)]
             self.strategy.clear_memory()
             break
       print(self.strategy.pp(which=self.strategy.Q))
             
-  def process_state(self, p = None, s = None, f = None, reward=None, learning=False):
+  def process_state(self, p = None, s = None, f = None, reward=0, learning=False):
     if p is None:
       p = self.grid.to_p(s)
     return self.strategy.process_state(p, reward=reward, learning=learning)
