@@ -6,6 +6,7 @@ gatech: pmiller75
 
 from GridMDP import GridMDP, PolicyIterationStrategy, ValueIterationStrategy, QLearnerStrategy
 from gym import make as gymmake
+from gym import wrappers
 # from gym.envs import register
 from gym.envs.toy_text.frozen_lake import generate_random_map
 import pickle as pk
@@ -77,42 +78,45 @@ class FrozenLake:
     return self.action_convert[action]
   
   def run_individual(self):
-    fl.mdp.clear_policy_memory()
+    self.mdp.clear_policy_memory()
     first_move = True
     i = 0
     while True:
       if first_move:
       #this is the first move we make.
-        observation, info = fl.env.reset()
-        action = fl.add_observation(observation, info)
+        observation, info = self.env.reset()
+        action = self.add_observation(observation, info)
         terminated, truncated = False, False
         first_move = False
       else:
-        observation, reward, terminated, truncated, info = fl.env.step(action)
-        action = fl.add_observation(observation, info, reward)
+        observation, reward, terminated, truncated, info = self.env.step(action)
+        action = self.add_observation(observation, info, reward)
       if terminated or truncated:
-        fl.env.close()
+        self.env.close()
         return {
           'reward':reward,
           'steps':i
         }
       else:
         i+=1
-  def run(self, strategy, runs_per_map = 10):
+  def run(self, strategy, runs_per_map = 10, monitor = True):
     results = {}
     for map_size in self.maps:
       results[map_size] = {'runs':[], 'summary':{}}
       print("----- ", map_size)
       success, total_runs_for_map_size = 0, 0
       for i, _map in enumerate(self.maps[map_size]):
-        fl.set_active_map(key=map_size, index=i)
-        for r in range(len(fl.map)):
-          for c in range(len(fl.map[r])):
-            print(fl.map[r][c], end="\t")
+        self.set_active_map(key=map_size, index=i)
+        for r in range(len(self.map)):
+          for c in range(len(self.map[r])):
+            print(self.map[r][c], end="\t")
           print("")
-        env = gymmake("FrozenLake-v1", desc=fl.map, is_slippery=True, max_episode_steps=2000, render_mode="")
-        fl.env = env
-        fl.mdp.build_policy(strategy=strategy, environment=self, punish=True)
+        env = gymmake("FrozenLake-v1", desc=self.map, is_slippery=True, max_episode_steps=2000, render_mode="")
+        # if monitor:
+          # env = wrappers.Monitor(env, "FrozenLake-v1")
+          
+        self.env = env
+        self.mdp.build_policy(strategy=strategy, environment=self, punish=True)
         for run_num in range(runs_per_map):
           run_result = self.run_individual()
           results[map_size]['runs'].append(run_result)
@@ -126,15 +130,15 @@ class FrozenLake:
 if __name__ == '__main__':
   fl = FrozenLake()
   map_sizes = [4,8]
-  fl.generate_and_save_maps(sizes=map_sizes, p=0.9, num_per_size=2)
+  # fl.generate_and_save_maps(sizes=map_sizes, p=0.9, num_per_size=2)
   # fl.run(strategy=QLearnerStrategy)
   # # fl.set_active_map(key=8, index=0)
   # # env = gymmake("FrozenLake-v1", desc=fl.map, is_slippery=True, max_episode_steps=2000, render_mode="")
   results = {}
   results['VI'] = fl.run(strategy=ValueIterationStrategy)
-  results['PI'] = fl.run(strategy=PolicyIterationStrategy)
-  results['Q'] = fl.run(strategy=QLearnerStrategy)
-  for m in map_sizes:
+  # results['PI'] = fl.run(strategy=PolicyIterationStrategy)
+  # results['Q'] = fl.run(strategy=QLearnerStrategy)
+  for m in fl.maps:
     print('VI', results['VI'][m]['summary'])
-    print('PI', results['PI'][m]['summary'])
-    print('Q', results['Q'][m]['summary'])
+    # print('PI', results['PI'][m]['summary'])
+    # print('Q', results['Q'][m]['summary'])
