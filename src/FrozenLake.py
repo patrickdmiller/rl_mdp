@@ -4,7 +4,7 @@ gihub: github.com/patrickdmiller
 gatech: pmiller75
 '''
 
-from GridMDP import GridMDP, PolicyIterationStrategy
+from GridMDP import GridMDP, PolicyIterationStrategy, ValueIterationStrategy, QLearnerStrategy
 from gym import make as gymmake
 # from gym.envs import register
 from gym.envs.toy_text.frozen_lake import generate_random_map
@@ -63,47 +63,64 @@ class FrozenLake:
     # self.init_mdp(default_reward=-0.04)
     self.init_mdp(default_reward=-.04)
   
-  def add_observation(self, observation, info):
-    
-    # observation, info = data
-    action = self.mdp.get_action(s=observation)
-    # print("at position", observation, "action = ", action)
-    
+  def add_observation(self, observation, info, reward=None):
+    # observation, info = dat
+    action = self.mdp.process_state(s=observation, reward=reward)
+    # print("at position", observation, "action = ", action)    
     return self.action_convert[action]
+
 if __name__ == '__main__':
   fl = FrozenLake()
-  fl.generate_and_save_maps(sizes=[20], p=0.9)
-  fl.set_active_map(key=20, index=0)
-  fl.mdp.build_policy(strategy=PolicyIterationStrategy)
-  print("UTILITY: ", fl.mdp.strategy.utilities.values)
-  env = gymmake("FrozenLake-v1", desc=fl.map, is_slippery=True, max_episode_steps=1250, render_mode="")
-  observation, info = env.reset(seed=42)
-  action = fl.add_observation(observation, info)
-  print("first action", action)
+  fl.generate_and_save_maps(sizes=[8], p=0.9)
+  fl.set_active_map(key=8, index=0)
+  env = gymmake("FrozenLake-v1", desc=fl.map, is_slippery=True, max_episode_steps=2000, render_mode="")
+
+  # fl.mdp.build_policy(strategy=PolicyIterationStrategy)
+  fl.env = env
+  fl.mdp.build_policy(strategy=QLearnerStrategy, environment = fl)
+  # print("UTILITY: ", fl.mdp.strategy.utilities.values)
+
+
   i=0
   
   history = []
   runs = 0
-  while runs < 150:
-    
-    observation, reward, terminated, truncated, info = env.step(action)
-    action = fl.add_observation(observation, info)
-  
+  first_move= True
+  # env.render_mode("human")
+  # env = gymmake("FrozenLake-v1", desc=fl.map, is_slippery=True, max_episode_steps=2000, render_mode="human")
+
+  print(env.spec)
+  while runs < 100:
+    if first_move:
+      #this is the first move we make.
+      observation, info = env.reset()
+      action = fl.add_observation(observation, info)
+      terminated, truncated = False, False
+      first_move = False
+    else:
+      observation, reward, terminated, truncated, info = env.step(action)
+      action = fl.add_observation(observation, info, reward)
     if terminated or truncated:
-        print(observation, reward, terminated, truncated, info)
-        observation, info = env.reset()
-        action = fl.add_observation(observation, info)
-        print("reset and at", observation, i)
+        # print(observation, reward, terminated, truncated, info)
+        # print(fl.mdp.strategy.pp(which=fl.mdp.strategy.Q))
+        # observation, info = env.reset()
+        fl.mdp.clear_policy_memory()
+        # action = fl.add_observation(observation, info)
         history.append([reward, i])
         runs+=1
         i=0
+        first_move = True
     else:
       i+=1   
          
-  print("done")
   
   #win/loss
   history = np.array(history)
   print("win", np.sum(history[:, 0]), "of ", len(history))
   print("avg moves", np.average(history[:,1]))
   env.close()
+  # print(fl.mdp.strategy.pp(fl.map))
+  for r in range(len(fl.map)):
+    for c in range(len(fl.map[r])):
+      print(fl.map[r][c], end="\t")
+    print("")

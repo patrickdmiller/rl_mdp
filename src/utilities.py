@@ -37,7 +37,9 @@ class Directions:
     self.probs['f'] = f
     self.probs['s'] = s
     self.probs['b'] = b
-  
+    
+  def __getitem__(self, i):
+    return self.dir_transitions[i]
   #returns neighbor and direction
   def get_all_neighbors_and_directions(self, p):
     neighbors = []

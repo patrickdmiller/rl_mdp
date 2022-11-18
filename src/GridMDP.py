@@ -9,23 +9,31 @@ import numpy as np
 from abc import ABC, abstractmethod
 from utilities import Utility, Directions
 
-class PolicyStrategy:
+class PolicyStrategy(ABC):
   def __init__(self):
     pass
   
+
+  def clear_memory(self):
+    pass
+  
+  def learn(self, *args, **kwargs):
+    print("No discrete learning defined for this strategy")
+    return None
+
   @abstractmethod
   def build(self):
     pass
 
   @abstractmethod
-  def get_policy_for_state(self, p):
+  #reward is the reward you got for getting into this state. it's up to the strategy to keep a memory of how it got there. 
+  def process_state(self, p, reward=None):
     pass
-  
+
   def pp(self, which=None):
     if not which:
       which = self.policy
-    if not self.grid or not self.policy:
-      return
+  
     print("size: ", self.grid.w, 'x', self.grid.h)
     for r in range(self.grid.h):
       print("")
@@ -57,7 +65,60 @@ class PolicyStrategy:
               self.policy[(r,c)] = best_direction
               did_change = True
     return did_change
+  
+class QLearnerStrategy(PolicyStrategy):
+  def __init__(self, grid, dirs, gamma = 0.5, epsilon= 0.5):
+    self.grid = grid
+    self.dirs = dirs
+    self.memory = None
+    self.Q = {}
+    self.gamma = gamma
+    self.epsilon = epsilon
+    self.alpha = 0.5
+  def build(self, **kwargs):
 
+    for r in range(self.grid.h):
+      for c in range(self.grid.w):
+        self.Q[(r,c)] = []
+        for d in self.dirs:
+          self.Q[(r,c)].append(0)
+          
+          
+  def process_state(self, p, reward, learning=False):
+    # print("Q table", self.Q[p])
+    
+    # if reward is not None and reward > 0 and self.memory != None:
+      # print("we got a reward of",reward, "at point",  p)
+    if reward != None and self.memory != None and learning:
+      #we received a reward for the thing we did in memory, add the reward
+      self.Q[self.memory[0]][self.memory[1]] = self.Q[self.memory[0]][self.memory[1]] + (self.alpha * (reward + (self.gamma * max(self.Q[p])))) - self.Q[self.memory[0]][self.memory[1]]
+    
+    #find the best Q
+    best_directions = []
+    best_value = -float('inf')
+    _value = self.Q[p][0]
+    _same_count = 0
+    for direction, value in enumerate(self.Q[p]):
+      if value == _value:
+        _same_count+=1
+      if value >= best_value:
+        if value > best_value:
+          best_directions = [direction]
+        else:
+          best_directions.append(direction)
+        best_value = value
+        
+    if _same_count == len(self.Q[p]) or (learning and np.random.random() < self.epsilon):
+      #if they're all the same or our random < epsilon, we explore aka random it. 
+      action =  np.random.randint(0, len(self.dirs))
+    else:
+      action = np.random.choice(best_directions)
+    
+    self.memory = [p, action]
+    return action
+  
+  def clear_memory(self):
+    self.memory = None
 class ValueIterationStrategy(PolicyStrategy):
   def __init__(self, grid, dirs, gamma=0.5): #inject grid and policy
     self.grid = grid
@@ -67,7 +128,7 @@ class ValueIterationStrategy(PolicyStrategy):
     self.history = []
     self.utilities = Utility(w = self.grid.w, h=self.grid.h)
     
-  def build(self, starting_policy = None):
+  def build(self, starting_policy = None, **kwargs):
     #if a starting policy , use it
     if starting_policy:
       self.policy = starting_policy
@@ -125,7 +186,7 @@ class ValueIterationStrategy(PolicyStrategy):
           self.utilities.set((r,c), new_u)
     return delta
 
-  def get_policy_for_state(self, p):
+  def process_state(self, p, reward=None):
     return self.policy[p]
 
   def get_utility_for_state(self, p):
@@ -139,7 +200,7 @@ class PolicyIterationStrategy(PolicyStrategy):
     self.history = []
     self.utilities = Utility(w = self.grid.w, h=self.grid.h)
     
-  def build(self, starting_policy = None):
+  def build(self, starting_policy = None, **kwargs):
     #if a starting policy , use it
     if starting_policy:
       self.policy = starting_policy
@@ -161,7 +222,7 @@ class PolicyIterationStrategy(PolicyStrategy):
         break
     self.pp()
   
-  def get_policy_for_state(self, p):
+  def process_state(self, p, reward=None):
     return self.policy[p]
 
   def get_utility_for_state(self, p):
@@ -191,7 +252,8 @@ class PolicyIterationStrategy(PolicyStrategy):
 
         
       self.history.append(delta)
-    
+
+
 class Grid:
   def __init__(self,w,h, default_reward=0, default_bad_reward=-1):
     self.w = w
@@ -273,25 +335,50 @@ class GridMDP:
     self.P = {}
     # self.P = self.P
     self.policy = self.grid.empty_states(-1)
-    self.S = self.build_statemap()
+    # self.S = self.build_statemap()
     # self.compute_state_transition_matrix()
-  def build_statemap(self):
-    pass
   
-  def build_policy(self, strategy=None, starting_policy=None):
+  def build_policy(self, strategy=None, starting_policy=None, environment = None):
     if not strategy:
       raise Exception("No strategy defined")
     else:
       self.policy = starting_policy
       self.strategy = strategy(grid = self.grid, dirs = self.dirs)
-      self.strategy.build()
+      self.strategy.build(environment = environment)
 
-  def get_action(self, p = None, s = None):
+    if strategy == QLearnerStrategy:
+      if not environment:
+        raise Exception("Q Learning requires an environment parameter to learn in")
+    
+      max_learning_epochs = 10000
+      for i in range(max_learning_epochs):
+        observation, info = environment.env.reset()
+        action = environment.action_convert[self.process_state(s=observation, learning=True)]
+        reward = 0
+        while True:
+          action = environment.action_convert[self.process_state(s = observation, reward= reward, learning=True)]
+          observation, reward, terminated, truncated, info = environment.env.step(action)
+          
+          if terminated or truncated:
+            #if we're in a terminal state AND we got no reward, we fell in the water.
+            if reward < 1 and self.grid.is_terminal(self.grid.to_p(observation)):
+              pass
+              environment.action_convert[self.process_state(s = observation, reward= -100, learning=True)]
+            else:
+              print("we got there!")
+              environment.action_convert[self.process_state(s = observation, reward= 100, learning=True)]
+            self.strategy.clear_memory()
+            break
+      print(self.strategy.pp(which=self.strategy.Q))
+            
+  def process_state(self, p = None, s = None, f = None, reward=None, learning=False):
     if p is None:
       p = self.grid.to_p(s)
-    return self.strategy.get_policy_for_state(p)
+    return self.strategy.process_state(p, reward=reward, learning=learning)
 
-
+  def clear_policy_memory(self):
+    self.strategy.clear_memory()
+    
   def compute_state_transition_matrix(self, full=False):
     if full:
       for r in range(self.grid.h):
@@ -399,6 +486,8 @@ class TestDirections(unittest.TestCase):
     self.assertEqual(self.mdp.strategy.policy[(0,1)], correct_policy[(0,1)])
     self.assertEqual(self.mdp.strategy.policy[(1,0)], correct_policy[(1,0)])
     self.assertEqual(self.mdp.strategy.policy[(2,3)], correct_policy[(2,3)])
+    
+    self.mdp.build_policy(strategy=QLearnerStrategy, starting_policy = policy)
 if __name__ == '__main__':
 
   unittest.main()
@@ -415,6 +504,6 @@ if __name__ == '__main__':
   mdp.compute_state_transition_matrix()
   mdp.build_policy()
   print(mdp.policy)
-  print(mdp.get_action(s=0))
+  print(mdp.process_state(s=0))
 
 
