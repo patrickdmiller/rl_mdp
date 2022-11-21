@@ -6,15 +6,16 @@ import os
 from abc import ABC, abstractmethod
 class TicTacToeState:
   @classmethod
-  def create(cls, state_key, n, rot=0):
-    print("building state from key")
+  def create(cls, state_key, n, rot=0, win_counter=None):
     l = np.array(cls.key_to_list(state_key))
-    l = np.rot90(l.reshape([3,3]), k = -rot)
+    l = np.rot90(l.reshape([n,n]), k = -rot)
     new_state = TicTacToeState(n)
     for r in range(n):
       for c in range(n):
         if l[r,c]!=0:
-          new_state.do_move(r,c, l[r,c])
+          is_win = new_state.do_move(r,c, l[r,c])
+          if is_win and win_counter:
+            win_counter[l[r,c]]+=1
     return new_state
 
   @classmethod
@@ -155,13 +156,13 @@ class TicTacToe:
   def __init__(self, n):
     self.n = n
     self._empty = TicTacToeState(n = self.n)
-    self.state_map = {self._empty.state_key():set(), 'win':set()}
+    self.state_map = {self._empty.state_key():set(), 'win1':set(), 'win-1':set()}
     self.empty_state = self.state_map[self._empty.state_key()]
     self.first = None
     self.current_state = self._empty
     self.turn = None
     self.state = TicTacToeState(n = self.n)
-    
+    print("init")
   def start_game(self, player1, player2):
     #first player is always x
     self.player1 = player1
@@ -171,7 +172,7 @@ class TicTacToe:
     self.turn = self.player1
     self.state = TicTacToeState(n = self.n)
     opening = True
-    max_turns = 5
+    max_turns = self.n * self.n
     turn_count = 0
     while True and turn_count < max_turns:
       turn_count+=1
@@ -180,10 +181,12 @@ class TicTacToe:
       did_win = False
       if 'move' in move:
         did_win = self.state.do_move(move['move'][0][0], move['move'][0][1], self.turn.piece)
-      if 'state' in move:
+      elif 'state' in move:
         #firgure out the move needed to get there
         r, c = self.state.move_for_next_state_key(next_state_key=move['state'])
         did_win = self.state.do_move(r,c,self.turn.piece)
+      else:
+        raise Exception("did not receive valid output from process_state")
       if opening and self.turn.t == 'agent':
         print("first move by agent. we will rotate")
         rot = np.random.randint(4)
@@ -193,6 +196,7 @@ class TicTacToe:
       print(self.state)
       if did_win:
         print("WINNER")
+        break
       if self.turn == self.player1:
         self.turn = player2
       else:
@@ -200,15 +204,18 @@ class TicTacToe:
     print("DONE")
       # return
         #we select a random rotation for the opening move since any move is valid at this point and the agents know nothing of rotation. this keeps opening moves fresh.
-  def build_state_map(self):
-    if os.path.isfile(os.path.join('./', f'ttt_{self.n}_pickle.p')):
+  def build_state_map(self, force=False):
+    if not force and os.path.isfile(os.path.join('./', f'ttt_{self.n}_pickle.p')):
       print("ttt state map file found")
       with open(os.path.join('./', f'ttt_{self.n}_pickle.p'), 'rb') as pickle_file:
         self.state_map = pk.load(pickle_file)
         return
+    else:
+      print("ttt not found. recreating")
     state = TicTacToeState(n = self.n)
+    debug = set()
     def build(state, piece, from_state):
-      print("piece is ", piece)
+      # print("piece is ", piece)
       # print(state)
       for r in range(self.n):
         for c in range(self.n):
@@ -216,18 +223,24 @@ class TicTacToe:
             #add it
             # state.m[r,c] = piece
             is_win = state.do_move(r,c,piece)
-            if is_win:
-              # print("winner: ", state.state_key(), state)
-              from_state.add('win')
-            else:
-              from_state.add(state.state_key())
-              if state.state_key() not in self.state_map:
-                self.state_map[state.state_key()] = set()
-                # if from_state is not None:
-                
+            # if is_win:
+            #   # print("winner: ", state.state_key(), state)
+            #   if 
+            #   from_state.add('win')
+            # else:
+            if state.state_key() in from_state:
+              return
+            from_state.add(state.state_key())
+            
+            if state.state_key() not in self.state_map:
+              self.state_map[state.state_key()] = set()
+              # if from_state is not None:
+              if not is_win:
                 build(state=state, piece=piece*-1, from_state = self.state_map[state.state_key()])
-                #remove it
+              #remove it
+            if is_win:
 
+              self.state_map[state.state_key()].add(f'win{piece}')
             state.clear_move(r,c)
                 # break
     build(state,1, self.empty_state)
@@ -243,11 +256,11 @@ class TicTacToe:
     
   
 class TicTacToeStrategy(ABC):
-  def __init__(self):
-    pass
+  def __init__(self, t='agent', **kwargs):
+    self.t = 'agent'
   
   @abstractmethod
-  def process_state(self, state, reward):
+  def process_state(self, state, reward=0):
     pass
   
   @abstractmethod
@@ -281,12 +294,127 @@ class TestStrategy(TicTacToeStrategy):
     return move
 
 class PolicyIterationStrategy(TicTacToeStrategy):
-  def __init__(self):
-    self.policy = {}
-    self.state_map = {}
-    self.utilities = {}
-  
+  def __init__(self, state_map, gamma = 0.5, delta_convergence_threshold=1, default_reward=0):
+    self.policy = {-1:{}, 1:{}}
+    self.gamma = gamma
+    self.state_map = state_map
+    self.utilities = {-1:{}, 1:{}}
+    self.rewards = {-1:{}, 1:{}}
+    self.delta_convergence_threshold=delta_convergence_threshold
+    self.default_reward=default_reward
+    super().__init__(t='agent')
+    
+  def process_state(self, state, reward=0):
+    return {'state': self.policy[self.piece][state.state_key()]}
 
+  def build(self, **kwargs):
+    #build policy and utilities as empty graphs
+    for key in self.state_map:
+      if len(self.state_map[key]) > 0:
+        self.policy[-1][key] = np.random.choice(list(self.state_map[key]))
+        self.policy[1][key] = np.random.choice(list(self.state_map[key]))
+      else:
+        self.policy[-1][key] = None
+        self.policy[1][key] = None
+        if key != 'win1' and key != 'win-1':
+          #cats game
+          self.rewards[-1][key] = -20
+          self.rewards[1][key] = -20
+        
+        
+      self.utilities[-1][key] = 0
+      self.utilities[1][key] = 0
+      
+    self.rewards[-1]['win-1'] = 100
+    self.rewards[-1]['win1'] = -200
+    self.rewards[1]['win1'] = 100
+    self.rewards[1]['win-1'] = -200
+    
+    #evaluate and build_policy
+    for piece in [1]:
+      max_iterations = 100
+      loops = 0
+      while True and loops < max_iterations:
+        loops+=1
+        self.evaluate(piece=piece)
+        if not self.build_policy(piece = piece):
+          print("no changes")
+          break
+        print("changes. looping")
+    
+  
+  def evaluate(self, piece = 0):
+    utility = self.utilities[piece]
+    for i in range(50):
+      delta = 0
+      for key in self.state_map:
+        
+        u = 0
+        if key in self.rewards[piece]:
+          u = self.rewards[piece][key]
+        else:
+          u = self.default_reward
+        if key == 'win-1' or key == 'win1' or self.policy[piece][key]==None : #win or cats game, just take the reward
+          #this is a terminal state. just give
+          u += ( self.gamma * utility[key] )
+        else:
+          policy_points_to = self.policy[piece][key]
+          
+          u+= (self.gamma * self.utilities[piece][policy_points_to])
+          # for next_key in self.state_map[key]:
+          #   u+=( self.gamma * utility[next_key])
+        delta += abs(utility[key] - u)
+        utility[key] = u
+        
+      print(delta)
+      if delta <= self.delta_convergence_threshold:
+        break
+    # print(utility)
+    
+  def build_policy(self, piece):
+    debug = False
+    did_change =  False
+    for key in self.policy[piece]:
+      if key == 'win-1' or key == 'win1':
+        continue
+      best_utility = -float('inf')
+      best_neighbor = None
+      debug = False
+      if key == '000000000':
+        debug = True
+      if debug:
+        print(self.policy[piece][key])
+      for neighbor in self.state_map[key]:
+        if debug:
+          print("neighbor", neighbor, self.utilities[piece][neighbor])
+        if self.utilities[piece][neighbor] > best_utility:
+          best_neighbor = neighbor
+          best_utility = self.utilities[piece][neighbor]
+      if self.policy[piece][key] != best_neighbor:
+        did_change = True
+        self.policy[piece][key] = best_neighbor
+    return did_change
+      
+class HumanStrategy(TicTacToeStrategy):
+  def __init__(self, *args, **kwargs):
+    super().__init__(t='human', *args, **kwargs)
+
+  def build(self):
+    pass
+
+  def process_state(self, state, reward=0):
+    invalid = True
+    while invalid:
+      
+      in_coord = input()
+      r,c = in_coord.split(',')
+      r = int(r)
+      c = int(c)
+      if state.m[r,c] == 0:
+        invalid = False
+    return {'move':((r,c), self.piece)}
+    print(in_coord)
+    
 if __name__ == '__main__':
   class Test(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -318,5 +446,17 @@ if __name__ == '__main__':
       
   # unittest.main()
   t = TicTacToe(3)
-  t.build_state_map()
+  t.build_state_map(force=False)
+  player1 = PolicyIterationStrategy(state_map = t.state_map)
+  player1.build()
   
+  player2 = HumanStrategy()
+  t.start_game(player1 = player1, player2 = player2)
+  #all winning states
+  # print("Winners")
+  # win_counter = {-1:0, 1:0}
+  # for key in t.state_map:
+  #   if 'win1' in t.state_map[key]:
+  #     print(key)
+  #     TicTacToeState.create(key, 3, win_counter=win_counter)
+  # print(win_counter)
