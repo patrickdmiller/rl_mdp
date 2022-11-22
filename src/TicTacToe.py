@@ -1,3 +1,7 @@
+'''TODO:
+make winning states have winning point value vs going to 'win' state. just give rewards high values for winning states. 
+'''
+
 import numpy as np
 from hashlib import sha1
 import unittest
@@ -474,7 +478,26 @@ class ValueIterationStrategy(TicTacToeStrategy):
       if delta <= self.delta_convergence_threshold:
         break
     # print(utility)
-    
+
+class QLearningStrategy(TicTacToeStrategy):
+  def __init__(self, state_map, gamma = 0.5, delta_convergence_threshold=1, default_reward=0, **kwargs):
+    self.policy = {-1:{}, 1:{}}
+    self.gamma = gamma
+    self.state_map = state_map
+    self.utilities = {-1:{}, 1:{}}
+    self.rewards = {-1:{}, 1:{}}
+    self.delta_convergence_threshold=delta_convergence_threshold
+    self.default_reward=default_reward
+    self.Q = {}
+    super().__init__(t='agent', **kwargs)
+  def build(self, **kwargs):
+    #build Q table
+    for key in self.state_map:
+      self.Q[key] = {}
+      for next_key in self.state_map[key]:
+        self.Q[key][next_key] = 0
+  def process_state(self, state, reward): #reward is th reward you got for going INTO this spot. so you need to remember your last move.
+    pass
 class HumanStrategy(TicTacToeStrategy):
   def __init__(self, *args, **kwargs):
     super().__init__(t='human', *args, **kwargs)
