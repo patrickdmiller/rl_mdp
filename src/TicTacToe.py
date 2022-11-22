@@ -163,12 +163,12 @@ class TicTacToe:
     self.turn = None
     self.state = TicTacToeState(n = self.n)
     print("init")
-  def start_game(self, player1, player2):
+  def start_game(self, player1, player2, debug = False):
     #first player is always x
     self.player1 = player1
-    self.player1.init_game(state_map = self.state_map, piece = 1)
+    self.player1.init_game(state_map = self.state_map, piece = 1, debug = debug)
     self.player2 = player2
-    self.player2.init_game(state_map = self.state_map, piece = -1)
+    self.player2.init_game(state_map = self.state_map, piece = -1, debug = debug)
     self.turn = self.player1
     self.state = TicTacToeState(n = self.n)
     opening = True
@@ -256,8 +256,9 @@ class TicTacToe:
     
   
 class TicTacToeStrategy(ABC):
-  def __init__(self, t='agent', **kwargs):
+  def __init__(self, t='agent', debug = False, **kwargs):
     self.t = 'agent'
+    self.debug = debug
   
   @abstractmethod
   def process_state(self, state, reward=0):
@@ -267,10 +268,44 @@ class TicTacToeStrategy(ABC):
   def build(self,):
     pass
   
-  def init_game(self, state_map, piece):
+  def build_policy(self, piece):
+    did_change =  False
+    for key in self.policy[piece]:
+      if key == 'win-1' or key == 'win1':
+        continue
+      best_utility = -float('inf')
+      best_neighbors = []
+      
+      for neighbor in self.state_map[key]:
+        if self.utilities[piece][neighbor] >= best_utility:
+          if self.utilities[piece][neighbor] > best_utility:
+            #just add it
+            best_neighbors = [neighbor]
+          else:
+            best_neighbors.append(neighbor)
+          best_utility = self.utilities[piece][neighbor]
+      #if current neighbor is not in the possible best, then we changed, otherwise, juts leave it the same
+      if best_neighbors and self.policy[piece][key] not in best_neighbors:
+        print(key)
+        print(best_neighbors)
+        did_change = True
+        self.policy[piece][key] = np.random.choice(best_neighbors)
+    return did_change
+      
+  def init_game(self, state_map, piece, debug=False, **kwargs):
     self.state_map = state_map
     self.piece = piece
-
+    self.debug = debug
+    if self.debug:
+      print("debug mode on")
+  def process_state(self, state, reward=0):
+    if self.debug:
+      print("received state", state.state_key())
+      print("policy: ", self.policy[self.piece][state.state_key()])
+      print("values from this state: ")
+      for key in self.state_map[state.state_key()]:
+        print("\t", key, " : ", self.utilities[self.piece][key])
+    return {'state': self.policy[self.piece][state.state_key()]}
 #just for unit tests. runs through moves in order. 
 class TestStrategy(TicTacToeStrategy):
   def __init__(self, t):
@@ -294,7 +329,7 @@ class TestStrategy(TicTacToeStrategy):
     return move
 
 class PolicyIterationStrategy(TicTacToeStrategy):
-  def __init__(self, state_map, gamma = 0.5, delta_convergence_threshold=1, default_reward=0):
+  def __init__(self, state_map, gamma = 0.5, delta_convergence_threshold=1, default_reward=0, **kwargs):
     self.policy = {-1:{}, 1:{}}
     self.gamma = gamma
     self.state_map = state_map
@@ -302,10 +337,9 @@ class PolicyIterationStrategy(TicTacToeStrategy):
     self.rewards = {-1:{}, 1:{}}
     self.delta_convergence_threshold=delta_convergence_threshold
     self.default_reward=default_reward
-    super().__init__(t='agent')
+    super().__init__(t='agent', **kwargs)
     
-  def process_state(self, state, reward=0):
-    return {'state': self.policy[self.piece][state.state_key()]}
+  
 
   def build(self, **kwargs):
     #build policy and utilities as empty graphs
@@ -326,9 +360,9 @@ class PolicyIterationStrategy(TicTacToeStrategy):
       self.utilities[1][key] = 0
       
     self.rewards[-1]['win-1'] = 100
-    self.rewards[-1]['win1'] = -200
+    self.rewards[-1]['win1'] = -1000000
     self.rewards[1]['win1'] = 100
-    self.rewards[1]['win-1'] = -200
+    self.rewards[1]['win-1'] = -1000000
     
     #evaluate and build_policy
     for piece in [1]:
@@ -341,7 +375,7 @@ class PolicyIterationStrategy(TicTacToeStrategy):
           print("no changes")
           break
         print("changes. looping")
-    
+    print(self.utilities[1])
   
   def evaluate(self, piece = 0):
     utility = self.utilities[piece]
@@ -360,9 +394,10 @@ class PolicyIterationStrategy(TicTacToeStrategy):
         else:
           policy_points_to = self.policy[piece][key]
           
-          u+= (self.gamma * self.utilities[piece][policy_points_to])
-          # for next_key in self.state_map[key]:
-          #   u+=( self.gamma * utility[next_key])
+          # u+= (self.gamma * self.utilities[piece][policy_points_to])
+          #so this is way better. this actually takes into account all the points near the policy. 
+          for next_key in self.state_map[key]:
+            u+=( self.gamma * utility[next_key])
         delta += abs(utility[key] - u)
         utility[key] = u
         
@@ -371,30 +406,75 @@ class PolicyIterationStrategy(TicTacToeStrategy):
         break
     # print(utility)
     
-  def build_policy(self, piece):
-    debug = False
-    did_change =  False
-    for key in self.policy[piece]:
-      if key == 'win-1' or key == 'win1':
-        continue
-      best_utility = -float('inf')
-      best_neighbor = None
-      debug = False
-      if key == '000000000':
-        debug = True
-      if debug:
-        print(self.policy[piece][key])
-      for neighbor in self.state_map[key]:
-        if debug:
-          print("neighbor", neighbor, self.utilities[piece][neighbor])
-        if self.utilities[piece][neighbor] > best_utility:
-          best_neighbor = neighbor
-          best_utility = self.utilities[piece][neighbor]
-      if self.policy[piece][key] != best_neighbor:
-        did_change = True
-        self.policy[piece][key] = best_neighbor
-    return did_change
+class ValueIterationStrategy(TicTacToeStrategy):
+  def __init__(self, state_map, gamma = 0.5, delta_convergence_threshold=1, default_reward=0, **kwargs):
+    self.policy = {-1:{}, 1:{}}
+    self.gamma = gamma
+    self.state_map = state_map
+    self.utilities = {-1:{}, 1:{}}
+    self.rewards = {-1:{}, 1:{}}
+    self.delta_convergence_threshold=delta_convergence_threshold
+    self.default_reward=default_reward
+    super().__init__(t='agent', **kwargs)
+  
+  def build(self, **kwargs):
+    for key in self.state_map:
+      if len(self.state_map[key]) > 0:
+        self.policy[-1][key] = -1
+        self.policy[1][key] = -1
+      else:
+        self.policy[-1][key] = None
+        self.policy[1][key] = None
+        if key != 'win1' and key != 'win-1':
+          #cats game
+          self.rewards[-1][key] = -20
+          self.rewards[1][key] = -20
+        
+        
+      self.utilities[-1][key] = 0
+      self.utilities[1][key] = 0
       
+    self.rewards[-1]['win-1'] = 100
+    self.rewards[-1]['win1'] = -1000000
+    self.rewards[1]['win1'] = 100
+    self.rewards[1]['win-1'] = -1000000
+    #evaluate and build_policy
+    for piece in [1]:
+      
+      self.iterate(piece=piece)
+      self.build_policy(piece = piece)
+      print("changes. looping")
+
+    
+  def iterate(self, piece = 0):
+    utility = self.utilities[piece]
+    for i in range(50):
+      delta = 0
+      for key in self.state_map:
+        
+        u = 0
+        if key in self.rewards[piece]:
+          u = self.rewards[piece][key]
+        else:
+          u = self.default_reward
+        if key == 'win-1' or key == 'win1' or self.policy[piece][key]==None : #win or cats game, just take the reward
+          #this is a terminal state. just give
+          u += ( self.gamma * utility[key] )
+        else:
+          # policy_points_to = self.policy[piece][key]
+          
+          # u+= (self.gamma * self.utilities[piece][policy_points_to])
+          #so this is way better. this actually takes into account all the points near the policy. 
+          for next_key in self.state_map[key]:
+            u+=( self.gamma * utility[next_key])
+        delta += abs(utility[key] - u)
+        utility[key] = u
+        
+      print(delta)
+      if delta <= self.delta_convergence_threshold:
+        break
+    # print(utility)
+    
 class HumanStrategy(TicTacToeStrategy):
   def __init__(self, *args, **kwargs):
     super().__init__(t='human', *args, **kwargs)
@@ -447,11 +527,12 @@ if __name__ == '__main__':
   # unittest.main()
   t = TicTacToe(3)
   t.build_state_map(force=False)
-  player1 = PolicyIterationStrategy(state_map = t.state_map)
+  # player1 = PolicyIterationStrategy(state_map = t.state_map)
+  player1 = ValueIterationStrategy(state_map = t.state_map)
   player1.build()
   
   player2 = HumanStrategy()
-  t.start_game(player1 = player1, player2 = player2)
+  t.start_game(player1 = player1, player2 = player2, debug=True)
   #all winning states
   # print("Winners")
   # win_counter = {-1:0, 1:0}
