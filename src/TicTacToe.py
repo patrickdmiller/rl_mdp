@@ -394,10 +394,10 @@ class PolicyIterationStrategy(TicTacToeStrategy):
         else:
           policy_points_to = self.policy[piece][key]
           
-          # u+= (self.gamma * self.utilities[piece][policy_points_to])
+          u+= (self.gamma * self.utilities[piece][policy_points_to])
           #so this is way better. this actually takes into account all the points near the policy. 
-          for next_key in self.state_map[key]:
-            u+=( self.gamma * utility[next_key])
+          # for next_key in self.state_map[key]:
+          #   u+=( self.gamma * utility[next_key])
         delta += abs(utility[key] - u)
         utility[key] = u
         
