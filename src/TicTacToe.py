@@ -81,16 +81,16 @@ class TicTacToeState:
           if count > 1:
             break
       if count == 1:
-        print("found key: ", key, "rotation: ", all_keys['keys'][key], "currently at rotation: ", self.rotation, "move", move)
+        # print("found key: ", key, "rotation: ", all_keys['keys'][key], "currently at rotation: ", self.rotation, "move", move)
         key_for_next_state_key = key
         move_r,move_c = self.key_position_to_r_c(move)
         move_rotation = all_keys['keys'][key]
         break
     
-    print("done", key_for_next_state_key)
-    print("rc in string is ", move_r, move_c, "adjusting for rotation of ", move_rotation)
+    # print("done", key_for_next_state_key)
+    # print("rc in string is ", move_r, move_c, "adjusting for rotation of ", move_rotation)
     move_r, move_c = self.rotate_r_c_right(move_r, move_c, move_rotation)
-    print("we need to do move", move_r, move_c)
+    # print("we need to do move", move_r, move_c)
     return (move_r, move_c)
     
         
@@ -160,11 +160,12 @@ class TicTacToeStateMap:
   @classmethod
   def load_or_init(cls, n, force_init = False, *args, **kwargs):
     if not force_init and os.path.isfile(os.path.join('./', f'ttt_{n}_pickle.p')):
+      print("loading from file")
       with open(os.path.join('./', f'ttt_{n}_pickle.p'), 'rb') as pickle_file:
         return pk.load(pickle_file)
     return cls(n=n, *args, **kwargs)
   
-  def __init__(self, n, default_reward=0, default_win_reward=100, default_lose_reward=-100, default_tie_reward = -10):
+  def __init__(self, n, default_reward=0, default_win_reward=100, default_lose_reward=-100, default_tie_reward = 10):
     self.n = n
     self._empty = TicTacToeState(n = self.n)
     self.state_map = {self._empty.state_key():set()}
@@ -236,16 +237,23 @@ class TicTacToe:
     self.current_state = self.state_map._empty
     self.turn = None
     self.state = TicTacToeState(n = self.n)
-  
-  def train_agent(self, trainee, opponent_strategy):
-    max_learning_epochs = 10000
+  def reset_state(self):
+    self.state = TicTacToeState(n = self.n)
+  def train_agent(self, trainee, opponent, max_attempts_for_change = 100, max_learning_epochs = 100000):
+    # max_learning_epochs = 10000
     games_results =[]
     for i in range(max_learning_epochs):
+      if i % 100 == 0:
+        print(i, end="..")
+        if i % 1000 == 0:
+          print("")
+      if trainee.last_change > max_attempts_for_change:
+        print(f'no change in at least {max_attempts_for_change}')
+        break
       player1 = trainee
-      player2 = opponent_strategy(state_map = self.state_map)
+      player2 = opponent
       result = self.start_game(player1 = player1, player2 = player2)
       player1.clear_memory()
-      
       if result[0] == 'TIE':
         games_results.append('TIE')
       else:
@@ -253,9 +261,9 @@ class TicTacToe:
           games_results.append('WIN')
         else:
           games_results.append('LOSE')
-        
+      # self.reset_state()
       player2= trainee
-      player1= opponent_strategy(state_map = self.state_map)
+      player1= opponent
       result = self.start_game(player1 = player1, player2 = player2)
      
       player2.clear_memory()
@@ -266,11 +274,13 @@ class TicTacToe:
           games_results.append('WIN')
         else:
           games_results.append('LOSE')
+      # self.reset_state()
     print("done training.")
     print(games_results)
       
     
   def start_game(self, player1, player2, debug = False):
+    self.reset_state()
     self.player1 = player1
     self.player1.init_game(state_map = self.state_map, piece = 1, debug = debug)
     self.player2 = player2
@@ -285,7 +295,8 @@ class TicTacToe:
       
       turn_count+=1
       move = self.turn.process_state(self.state, reward=self.state_map.get_reward(self.state.state_key(), piece=self.turn.piece))
-      print("move: ", move)
+      if debug:
+        print("move: ", move)
       did_win = False
       if 'move' in move:
         did_win = self.state.do_move(move['move'][0][0], move['move'][0][1], self.turn.piece)
@@ -296,15 +307,18 @@ class TicTacToe:
       else:
         raise Exception("did not receive valid output from process_state")
       if opening and self.turn.t == 'agent':
-        print("first move by agent. we will rotate")
+        if debug:
+          print("first move by agent. we will rotate")
         rot = np.random.randint(4)
+        self.state.rotation = rot
       if opening:
         opening = False
       if debug:
         print("the current board state is: ", self.state.state_key(), self.state.rotation)
         print(self.state)
       if did_win:
-        print("WINNER")
+        if debug:
+          print("WINNER")
         outcome = ('WIN',self.turn.piece)
         break
       
@@ -315,7 +329,10 @@ class TicTacToe:
       #let the agents know the outcome
     player1.process_state(self.state, reward=self.state_map.get_reward(self.state.state_key(), piece=player1.piece))
     player2.process_state(self.state, reward=self.state_map.get_reward(self.state.state_key(), piece=player2.piece))
-    print("DONE")
+    if debug:
+      print("DONE")
+    player1.finish()
+    player2.finish()
     return outcome
     
     
@@ -331,7 +348,9 @@ class TicTacToeStrategy(ABC):
   @abstractmethod
   def build(self,):
     pass
-  
+  def finish(self):
+    pass
+
   #assumes subclass populated state_map etc..
   def build_policy(self, piece):
     did_change =  False
@@ -506,8 +525,10 @@ class QLearningStrategy(TicTacToeStrategy):
     self.Q = {-1:{}, 1:{}}
     self.alpha = 0.5
     self.gamma = gamma
+    self.last_change = 0
     super().__init__(t='agent', **kwargs)
-    
+  def finish(self):
+    self.clear_memory()
   def build(self, **kwargs):
     #build Q table
     for key in self.state_map.keys():
@@ -519,6 +540,7 @@ class QLearningStrategy(TicTacToeStrategy):
     
   def clear_memory(self):
     self.memory = None
+    
   def get_max_action_value_from_state_key(self, state_key, piece):
     if self.state_map.is_terminal(state_key):
       return self.state_map.get_reward(state_key, piece)
@@ -541,15 +563,22 @@ class QLearningStrategy(TicTacToeStrategy):
           max_actions = [next_key]
     return max_actions
   def process_state(self, state,  reward, learning=True, piece = None): #reward is th reward you got for going INTO this spot. so you need to remember your last move.
-    print("received ", reward, state.state_key())
+    if self.debug:
+      print("received ", reward, state.state_key())
     if piece == None:
       piece = self.piece
     Q = self.Q[piece]
     
     if self.memory != None and learning:
       # reward = self.state_map.get_reward(state_key = state.state_key(), piece=piece)
+      previous_Q = Q[self.memory[0]][self.memory[1]]
       Q[self.memory[0]][self.memory[1]] = ((1-self.alpha) * Q[self.memory[0]][self.memory[1]] ) + self.alpha * ( reward + (self.gamma * self.get_max_action_value_from_state_key(state_key=state.state_key(), piece=piece)))  
-      print("Q is updated: ", Q[self.memory[0]][self.memory[1]])
+      if previous_Q !=  Q[self.memory[0]][self.memory[1]]:
+        self.last_change+=1
+      else:
+        self.last_change = 0
+      if self.debug:
+        print("Q is updated: ", Q[self.memory[0]][self.memory[1]])
       
     #pick the next move
     
@@ -559,7 +588,7 @@ class QLearningStrategy(TicTacToeStrategy):
 class RandomStrategy(TicTacToeStrategy):
   
   def process_state(self, state, reward=0):
-    print("here")
+    # print("here")
     if self.state_map.is_terminal(state.state_key()):
       return None
     action = np.random.choice(list(self.state_map[state.state_key()]))
@@ -582,6 +611,8 @@ class HumanStrategy(TicTacToeStrategy):
     while invalid:
       
       in_coord = input()
+      if in_coord=='':
+        continue
       r,c = in_coord.split(',')
       r = int(r)
       c = int(c)
@@ -622,18 +653,25 @@ if __name__ == '__main__':
   # unittest.main()
   # 3! = 362880
 
-  t = TicTacToe(3)
+  t = TicTacToe(4)
   print("loaded")
   # player1 = PolicyIterationStrategy(state_map = t.state_map)
   # player2 = ValueIterationStrategy(state_map = t.state_map)
   player2 = QLearningStrategy(state_map = t.state_map)
-  # player2 = RandomStrategy(state_map = t.state_map)
-  # player1.build()
-  t.train_agent(trainee=player2, opponent_strategy=RandomStrategy)
+  print("training")
+  # t.train_agent(trainee=player2, opponent_strategy=RandomStrategy, max_attempts_for_change=1000)
+  t.train_agent(trainee=player2, opponent=RandomStrategy(t.state_map), max_attempts_for_change=1000, max_learning_epochs = 300000)
+  
+  # print("training...")
+  t.train_agent(trainee=player2, opponent=PolicyIterationStrategy(t.state_map), max_attempts_for_change=10000, max_learning_epochs=10000)
+  # t.train_agent(trainee=player2, opponent=ValueIterationStrategy(t.state_map), max_attempts_for_change=1000)
   # player1 = PolicyIterationStrategy(state_map = t.state_map)
   player1 = HumanStrategy()
   #HumanStrategy()
-  t.start_game(player1 = player1, player2 = player2, debug=True)
+  while True:
+    print("new game")
+    t.start_game(player1 = player1, player2 = player2, debug=True)
+    
   # for key in t.state_map.keys():
   #   for next_key in player2.Q[-1][key]:
   #     if player2.Q[-1][key][next_key] != 0:
