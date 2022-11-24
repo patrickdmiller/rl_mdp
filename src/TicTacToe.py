@@ -1,6 +1,3 @@
-'''TODO:
-make winning states have winning point value vs going to 'win' state. just give rewards high values for winning states. 
-'''
 
 import numpy as np
 from hashlib import sha1
@@ -517,15 +514,17 @@ class ValueIterationStrategy(TicTacToeStrategy):
 
 
 class QLearningStrategy(TicTacToeStrategy):
-  def __init__(self, state_map, gamma = 0.5, delta_convergence_threshold=1, default_reward=0, **kwargs):
+  def __init__(self, state_map, gamma = 0.5, epsilon=0.05, alpha = 0.5, delta_convergence_threshold=1,**kwargs):
     #state_map is a handy way to know next valid moves. we are not using it to make the policy
-    self.memory = None #(state_key, action_state_key) #from state key we went to...
+    self.alpha = alpha
     self.gamma = gamma
+    self.epsilon = epsilon
+    self.memory = None #(state_key, action_state_key) #from state key we went to...
     self.state_map = state_map
     self.Q = {-1:{}, 1:{}}
-    self.alpha = 0.5
-    self.gamma = gamma
+
     self.last_change = 0
+    
     super().__init__(t='agent', **kwargs)
   def finish(self):
     self.clear_memory()
@@ -571,6 +570,7 @@ class QLearningStrategy(TicTacToeStrategy):
     
     if self.memory != None and learning:
       # reward = self.state_map.get_reward(state_key = state.state_key(), piece=piece)
+      
       previous_Q = Q[self.memory[0]][self.memory[1]]
       Q[self.memory[0]][self.memory[1]] = ((1-self.alpha) * Q[self.memory[0]][self.memory[1]] ) + self.alpha * ( reward + (self.gamma * self.get_max_action_value_from_state_key(state_key=state.state_key(), piece=piece)))  
       if previous_Q !=  Q[self.memory[0]][self.memory[1]]:
@@ -579,10 +579,15 @@ class QLearningStrategy(TicTacToeStrategy):
         self.last_change = 0
       if self.debug:
         print("Q is updated: ", Q[self.memory[0]][self.memory[1]])
-      
-    #pick the next move
     
     action = np.random.choice(self.get_max_actions_from_state_key(state.state_key(), piece))
+    
+    #there's an epsilon chance that we explore instead
+    if learning:
+      if np.random.random() < self.epsilon and len(self.state_map[state.state_key()]) > 0:
+        # print("from ",state.state_key(), "explore", list(self.state_map[state.state_key()]))
+        action = np.random.choice(list(self.state_map[state.state_key()]))
+    
     self.memory = (state.state_key(), action)
     return {'state': action}
 class RandomStrategy(TicTacToeStrategy):

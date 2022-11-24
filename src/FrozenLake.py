@@ -12,6 +12,7 @@ from gym.envs.toy_text.frozen_lake import generate_random_map
 import pickle as pk
 import os
 import numpy as np
+from time import perf_counter
 # register("FrozenLake-v1", max_episode_steps=250)
 
 class FrozenLake:
@@ -99,33 +100,53 @@ class FrozenLake:
         }
       else:
         i+=1
-  def run(self, strategy, runs_per_map = 10, monitor = True):
+  def run(self, strategy, runs_per_map = 10, *args, **kwargs):
+    is_q = False
+    if strategy == QLearnerStrategy:
+      is_q = True
     results = {}
     for map_size in self.maps:
-      results[map_size] = {'runs':[], 'summary':{}}
+      results[map_size] = {'runs':[], 'summary':{}, 'history':[], 'policy':[], 'time':[]}
       print("----- ", map_size)
-      success, total_runs_for_map_size = 0, 0
+      success, total_runs_for_map_size, steps , found_goal_in_episode, build_time = 0, 0, 0, 0,0
       for i, _map in enumerate(self.maps[map_size]):
         self.set_active_map(key=map_size, index=i)
-        for r in range(len(self.map)):
-          for c in range(len(self.map[r])):
-            print(self.map[r][c], end="\t")
-          print("")
+        # for r in range(len(self.map)):
+        #   for c in range(len(self.map[r])):
+        #     print(self.map[r][c], end="\t")
+        #   print("")
         env = gymmake("FrozenLake-v1", desc=self.map, is_slippery=True, max_episode_steps=2000, render_mode="")
         # if monitor:
           # env = wrappers.Monitor(env, "FrozenLake-v1")
           
         self.env = env
-        self.mdp.build_policy(strategy=strategy, environment=self, punish=True)
+        t = perf_counter()
+        self.mdp.build_policy(strategy=strategy, environment=self, *args, **kwargs )
+        t = perf_counter()-t
+        build_time+=t
+        results[map_size]['time'].append(t)
+        results[map_size]['policy'].append(self.mdp.strategy.get_policy())
+        # print("HISTORY:", self.mdp.strategy.history)
+        results[map_size]['history'].append(self.mdp.strategy.history)
+        #history can be an array per map
+        if is_q:
+          found_goal_in_episode+= results[map_size]['history'][-1][0]['found_goal_episode']
         for run_num in range(runs_per_map):
+          # print("run: ", run_num)
           run_result = self.run_individual()
-          results[map_size]['runs'].append(run_result)
+          # results[map_size]['runs'].append(run_result)
           if run_result['reward'] > 0:
             success+=1
+          steps+=run_result['steps']
           total_runs_for_map_size+=1
       #summarize
-      
+      # results[map_size]
       results[map_size]['summary']['success'] = success / total_runs_for_map_size
+      results[map_size]['summary']['averag_steps'] = steps / total_runs_for_map_size
+      results[map_size]['summary']['averag_build_time'] = build_time / len(self.maps[map_size])
+      #for the number of maps, since we only do this on training
+      if is_q:
+        results[map_size]['summary']['average_found_goal_in_episode'] = found_goal_in_episode / len(self.maps[map_size])
     return results
 if __name__ == '__main__':
   fl = FrozenLake()

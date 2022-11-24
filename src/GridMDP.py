@@ -3,7 +3,7 @@ author: patrick miller
 gihub: github.com/patrickdmiller
 gatech: pmiller75
 '''
-
+from time import perf_counter
 import unittest
 import numpy as np
 from abc import ABC, abstractmethod
@@ -13,7 +13,9 @@ class PolicyStrategy(ABC):
   def __init__(self):
     pass
   
-
+  def get_policy(self):
+    return self.policy
+  
   def clear_memory(self):
     pass
   
@@ -66,16 +68,26 @@ class PolicyStrategy(ABC):
               did_change = True
     return did_change
   
+#best gammma 0.9, alpha 0.5, epsiloon = 0
 class QLearnerStrategy(PolicyStrategy):
-  def __init__(self, grid, dirs, gamma = 0.5, epsilon= 0.1):
+  def __init__(self, grid, dirs, gamma = 0.5, alpha = 0.5, epsilon= 0.05, *args, **kwargs):
     self.grid = grid
     self.dirs = dirs
     self.memory = None
     self.Q = {}
-    self.gamma = .9
+    self.gamma = gamma
     self.epsilon = epsilon
-    self.alpha = 0.5
-  def build(self, **kwargs):
+    self.alpha = alpha
+    self.history = []
+    self.last_change = 0
+    self.found_goal = False
+    self.iteration = 0
+
+    print(f'init strategy with alpha {self.alpha}, gamma {self.gamma}, epsilon {self.epsilon}')
+  def get_policy(self):
+    return self.Q
+  
+  def build(self, *args, **kwargs):
 
     for r in range(self.grid.h):
       for c in range(self.grid.w):
@@ -90,13 +102,23 @@ class QLearnerStrategy(PolicyStrategy):
     # if reward is not None and reward > 0 and self.memory != None:
       # print("we got a reward of",reward, "at point",  p)
     if self.memory != None and learning:
+      if reward > 0 and not self.found_goal:
+        self.found_goal = True
       #we received a reward for the thing we did in memory, add the reward
       # self.Q[self.memory[0]][self.memory[1]] = self.Q[self.memory[0]][self.memory[1]] + (self.alpha * (reward + (self.gamma * max(self.Q[p])))) - self.Q[self.memory[0]][self.memory[1]]
       # if (reward + (self.gamma * max(self.Q[p]))) > 0:
-      
+      previous_Q = self.Q[self.memory[0]][self.memory[1]]
       # self.Q[self.memory[0]][self.memory[1]] = ( reward + (self.gamma * max(self.Q[p])))  
       self.Q[self.memory[0]][self.memory[1]] = ((1-self.alpha) * self.Q[self.memory[0]][self.memory[1]] ) + self.alpha * ( reward + (self.gamma * max(self.Q[p])))  
     #find the best Q
+          
+      if previous_Q !=  self.Q[self.memory[0]][self.memory[1]] and self.found_goal:
+        self.last_change+=1
+      else:
+        self.last_change = 0
+
+    
+    
     best_directions = []
     best_value = -float('inf')
     _value = self.Q[p][0]
@@ -123,7 +145,7 @@ class QLearnerStrategy(PolicyStrategy):
   def clear_memory(self):
     self.memory = None
 class ValueIterationStrategy(PolicyStrategy):
-  def __init__(self, grid, dirs, gamma=0.5): #inject grid and policy
+  def __init__(self, grid, dirs, gamma=0.5, *args, **kwargs): #inject grid and policy
     self.grid = grid
     self.policy = None
     self.dirs = dirs
@@ -131,32 +153,25 @@ class ValueIterationStrategy(PolicyStrategy):
     self.history = []
     self.utilities = Utility(w = self.grid.w, h=self.grid.h)
     
-  def build(self, starting_policy = None, **kwargs):
+  def build(self, starting_policy = None, delta_convergence_threshold=.01, **kwargs):
+    print("building with delta convergence", delta_convergence_threshold)
     #if a starting policy , use it
     if starting_policy:
       self.policy = starting_policy
     else:
       #random
       self.policy = self.grid.empty_states(0)
-        #generate a random policy
-      # for r in range(self.grid.h):
-      #   for c in range(self.grid.w):
-      #     if self.grid.is_valid((r,c)) and not self.grid.is_bad((r,c)):
-      #       self.policy[(r,c)] = np.random.randint(0, len(self.dirs))
-    self.pp(which=self.utilities)
-    for i in range(100):
-      self.iterate()
-    # max_iterations = 500
-    # loops = 0
-    # while True and loops < max_iterations:
-    #   loops+=1
-    #   self.evaluate()
-    #   if not self.improve():
-    #     break
+    # self.pp(which=self.utilities)
+    self.history.append({'iterations':[]})
+    for i in range(100000):
+      delta = self.iterate()
+      self.history[-1]['iterations'].append(delta)
+      if delta < delta_convergence_threshold:
+        break
+    # print("took: ",  len(self.history[-1]['iterations']))
     self.build_policy()
-    self.pp(which=self.utilities)
-    self.pp()
-  
+    # self.pp(which=self.utilities)
+    # self.pp()
   def iterate(self):
     #iterate over each space
     delta = 0
@@ -195,7 +210,7 @@ class ValueIterationStrategy(PolicyStrategy):
   def get_utility_for_state(self, p):
     return self.utilities.get(p)
 class PolicyIterationStrategy(PolicyStrategy):
-  def __init__(self, grid, dirs, gamma=0.5): #inject grid and policy
+  def __init__(self, grid, dirs, gamma=0.5, *args, **kwargs): #inject grid and policy
     self.grid = grid
     self.policy = None
     self.dirs = dirs
@@ -203,7 +218,7 @@ class PolicyIterationStrategy(PolicyStrategy):
     self.history = []
     self.utilities = Utility(w = self.grid.w, h=self.grid.h)
     
-  def build(self, starting_policy = None, **kwargs):
+  def build(self, starting_policy = None, delta_convergence_threshold=.01, **kwargs):
     #if a starting policy , use it
     if starting_policy:
       self.policy = starting_policy
@@ -218,12 +233,14 @@ class PolicyIterationStrategy(PolicyStrategy):
     
     max_iterations = 500
     loops = 0
+    self.history = []
     while True and loops < max_iterations:
       loops+=1
-      self.evaluate()
+      self.history.append({'iterations':[]})
+      self.evaluate(delta_convergence_threshold=delta_convergence_threshold)
       if not self.build_policy():
         break
-    self.pp()
+    # self.pp()
   
   def process_state(self, p, reward=None, **kwargs):
     return self.policy[p]
@@ -231,9 +248,9 @@ class PolicyIterationStrategy(PolicyStrategy):
   def get_utility_for_state(self, p):
     return self.utilities.get(p)
  
-  def evaluate(self):
+  def evaluate(self, delta_convergence_threshold=.001):
     #iterate over each 
-    for i in range(50):
+    for i in range(10000):
       delta = 0
       for r in range(self.grid.h):
         for c in range(self.grid.w):
@@ -253,8 +270,11 @@ class PolicyIterationStrategy(PolicyStrategy):
           debug_s+=f' = {u}'
           # print(debug_s)
 
-        
-      self.history.append(delta)
+      
+      # print("took: ",  len(self.history[-1]['iterations']))  
+      self.history[-1]['iterations'].append(delta)
+      if delta < delta_convergence_threshold:
+        break
 
 
 class Grid:
@@ -341,20 +361,30 @@ class GridMDP:
     # self.S = self.build_statemap()
     # self.compute_state_transition_matrix()
   
-  def build_policy(self, strategy=None, starting_policy=None, environment = None, punish=False):
+  def build_policy(self, strategy=None, starting_policy=None, environment = None, punish=True, max_episodes_after_finding_goal_factor=100, *args, **kwargs):
     if not strategy:
       raise Exception("No strategy defined")
     else:
       self.policy = starting_policy
-      self.strategy = strategy(grid = self.grid, dirs = self.dirs)
-      self.strategy.build(environment = environment)
+      self.strategy = strategy(grid = self.grid, dirs = self.dirs, *args, **kwargs)
+      self.strategy.build(environment = environment, *args, **kwargs)
 
     if strategy == QLearnerStrategy:
       if not environment:
         raise Exception("Q Learning requires an environment parameter to learn in")
     
-      max_learning_epochs = 100000
-      for i in range(max_learning_epochs):
+      max_learning_episodes = 100000
+      self.strategy.last_change = 0
+      self.strategy.found_goal = False
+      self.strategy.iteration = 0
+      self.strategy.history = [{'found_goal_episode':max_learning_episodes}]
+      flag_found_goal = False
+      for i in range(max_learning_episodes):
+        if self.strategy.found_goal and not flag_found_goal:
+          self.strategy.history = [{'found_goal_episode':i}]
+        if self.strategy.last_change > max(self.grid.w, self.grid.h) * max_episodes_after_finding_goal_factor and self.strategy.found_goal:
+          print("BREAKING")
+          break
         observation, info = environment.env.reset()
         action = environment.action_convert[self.process_state(s=observation, learning=True)]
         reward = 0
@@ -373,7 +403,8 @@ class GridMDP:
               environment.action_convert[self.process_state(s = observation, reward= 10, learning=True)]
             self.strategy.clear_memory()
             break
-      print(self.strategy.pp(which=self.strategy.Q))
+        
+      # print(self.strategy.pp(which=self.strategy.Q))
             
   def process_state(self, p = None, s = None, f = None, reward=0, learning=False):
     if p is None:
