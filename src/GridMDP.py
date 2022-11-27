@@ -70,7 +70,7 @@ class PolicyStrategy(ABC):
   
 #best gammma 0.9, alpha 0.5, epsiloon = 0
 class QLearnerStrategy(PolicyStrategy):
-  def __init__(self, grid, dirs, gamma = 0.5, alpha = 0.5, epsilon= 0.05, *args, **kwargs):
+  def __init__(self, grid, dirs, gamma = 0.5, alpha = 0.5, epsilon= 0.05, max_learning_episodes=1, *args, **kwargs):
     self.grid = grid
     self.dirs = dirs
     self.memory = None
@@ -82,8 +82,8 @@ class QLearnerStrategy(PolicyStrategy):
     self.last_change = 0
     self.found_goal = False
     self.iteration = 0
-
-    print(f'init strategy with alpha {self.alpha}, gamma {self.gamma}, epsilon {self.epsilon}')
+    self.max_learning_episodes = max_learning_episodes
+    print(f'init strategy with alpha {self.alpha}, gamma {self.gamma}, epsilon {self.epsilon}, max_learning_episodes {max_learning_episodes}')
   def get_policy(self):
     return self.Q
   
@@ -112,7 +112,7 @@ class QLearnerStrategy(PolicyStrategy):
       self.Q[self.memory[0]][self.memory[1]] = ((1-self.alpha) * self.Q[self.memory[0]][self.memory[1]] ) + self.alpha * ( reward + (self.gamma * max(self.Q[p])))  
     #find the best Q
           
-      if previous_Q !=  self.Q[self.memory[0]][self.memory[1]] and self.found_goal:
+      if previous_Q ==  self.Q[self.memory[0]][self.memory[1]] and self.found_goal:
         self.last_change+=1
       else:
         self.last_change = 0
@@ -361,7 +361,7 @@ class GridMDP:
     # self.S = self.build_statemap()
     # self.compute_state_transition_matrix()
   
-  def build_policy(self, strategy=None, starting_policy=None, environment = None, punish=True, max_episodes_after_finding_goal_factor=100, *args, **kwargs):
+  def build_policy(self, strategy=None, starting_policy=None, environment = None, punish=True, max_episodes_after_finding_goal_factor=100,max_learning_episodes=100000, *args, **kwargs):
     if not strategy:
       raise Exception("No strategy defined")
     else:
@@ -373,7 +373,7 @@ class GridMDP:
       if not environment:
         raise Exception("Q Learning requires an environment parameter to learn in")
     
-      max_learning_episodes = 100000
+      print("looping", max_learning_episodes) 
       self.strategy.last_change = 0
       self.strategy.found_goal = False
       self.strategy.iteration = 0
@@ -382,9 +382,9 @@ class GridMDP:
       for i in range(max_learning_episodes):
         if self.strategy.found_goal and not flag_found_goal:
           self.strategy.history = [{'found_goal_episode':i}]
-        if self.strategy.last_change > max(self.grid.w, self.grid.h) * max_episodes_after_finding_goal_factor and self.strategy.found_goal:
-          print("BREAKING")
-          break
+        # if self.strategy.last_change > max(self.grid.w, self.grid.h) * max_episodes_after_finding_goal_factor and self.strategy.found_goal:
+        #   print("BREAKING")
+        #   break
         observation, info = environment.env.reset()
         action = environment.action_convert[self.process_state(s=observation, learning=True)]
         reward = 0

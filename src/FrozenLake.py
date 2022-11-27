@@ -38,7 +38,7 @@ class FrozenLake:
     for r in range(self.map_size):
       for c in range(self.map_size):
         if self.map[r][c] == 'G':
-          self.mdp.grid.add_reward(p=(r,c), amt=10000)
+          self.mdp.grid.add_reward(p=(r,c), amt=100)
           self.mdp.grid.add_terminal(p=(r,c))
         elif self.map[r][c] == 'H':
           #is a hole invalid or negative reward? You don't bounce off. you actually end the game so i am going with negative reward here. 
@@ -69,8 +69,7 @@ class FrozenLake:
   def set_active_map(self, key, index):
     self.map_size = key
     self.map = self.maps[key][index]
-    # self.init_mdp(default_reward=-0.04)
-    self.init_mdp(default_reward=-.04)
+    self.init_mdp(default_reward=-.05)
   
   def add_observation(self, observation, info, reward=None):
     # observation, info = dat
